@@ -22,6 +22,7 @@ pub fn main() anyerror!void {
     rl.setConfigFlags(.{ .window_resizable = true, .msaa_4x_hint = true });
     rl.initWindow(init_width, init_height, "ZigDraw");
     defer rl.closeWindow();
+    rl.setExitKey(.null);
     rl.setTargetFPS(60);
 
     var canvas = Canvas{};
@@ -91,12 +92,14 @@ pub fn main() anyerror!void {
             }
         }
 
-        // Escape: cancel drawing or deselect (only when command bar hidden)
+        // Escape: cancel drawing, deselect, or reset tool (only when command bar hidden)
         if (rl.isKeyPressed(.escape) and cmd_bar.mode == .hidden) {
             if (is_drawing) {
                 if (current_shape) |*cs| cs.deinit(allocator);
                 current_shape = null;
                 is_drawing = false;
+            } else if (toolbar.current_tool != .select) {
+                toolbar.current_tool = .select;
             } else {
                 shapes.deselectAll();
             }
