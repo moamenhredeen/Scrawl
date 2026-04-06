@@ -77,6 +77,12 @@ pub const Shape = struct {
         }
     }
 
+    /// Check if this shape's bounding rect intersects with a given rectangle.
+    pub fn intersectsRect(self: Shape, rect: rl.Rectangle) bool {
+        const br = self.boundingRect();
+        return rl.checkCollisionRecs(br, rect);
+    }
+
     pub fn draw(self: Shape) void {
         switch (self.kind) {
             .rectangle => {
@@ -202,6 +208,38 @@ pub const ShapeList = struct {
             i -= 1;
             if (self.shapes.items[i].selected) {
                 self.remove(i);
+            }
+        }
+    }
+
+    pub fn hasSelected(self: ShapeList) bool {
+        for (self.shapes.items) |s| {
+            if (s.selected) return true;
+        }
+        return false;
+    }
+
+    /// Select all shapes whose bounding rect intersects the given rectangle.
+    pub fn selectInRect(self: *ShapeList, rect: rl.Rectangle) void {
+        for (self.shapes.items) |*s| {
+            if (s.intersectsRect(rect)) {
+                s.selected = true;
+            }
+        }
+    }
+
+    /// Move all selected shapes by a delta.
+    pub fn moveSelected(self: *ShapeList, dx: f32, dy: f32) void {
+        for (self.shapes.items) |*s| {
+            if (s.selected) {
+                s.start.x += dx;
+                s.start.y += dy;
+                s.end.x += dx;
+                s.end.y += dy;
+                for (s.points.items) |*p| {
+                    p.x += dx;
+                    p.y += dy;
+                }
             }
         }
     }

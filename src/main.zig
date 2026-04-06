@@ -34,8 +34,12 @@ pub fn main() anyerror!void {
 
     // Selection/drag state
     var is_dragging = false;
-    var drag_offset = rl.Vector2{ .x = 0, .y = 0 };
-    var drag_index: ?usize = null;
+    var drag_start = rl.Vector2{ .x = 0, .y = 0 };
+    var drag_last = rl.Vector2{ .x = 0, .y = 0 };
+
+    // Marquee selection state
+    var is_marquee = false;
+    var marquee_start = rl.Vector2{ .x = 0, .y = 0 };
 
     // Push initial empty state
     try history.pushState(&shapes);
@@ -95,8 +99,10 @@ pub fn main() anyerror!void {
                 .select => handleSelect(
                     &shapes,
                     &is_dragging,
-                    &drag_offset,
-                    &drag_index,
+                    &drag_start,
+                    &drag_last,
+                    &is_marquee,
+                    &marquee_start,
                     mouse_world,
                     &history,
                 ),
@@ -123,6 +129,12 @@ pub fn main() anyerror!void {
         drawGrid(&canvas, screen_w, screen_h, toolbar.height, toolbar.theme);
         shapes.drawAll();
         if (current_shape) |cs| cs.draw();
+        // Draw marquee selection rectangle
+        if (is_marquee) {
+            const mrect = normalizeRect(marquee_start, mouse_world);
+            rl.drawRectangleLinesEx(mrect, 1.0 / canvas.zoom, rl.Color.init(100, 150, 255, 200));
+            rl.drawRectangleRec(mrect, rl.Color.init(100, 150, 255, 40));
+        }
         canvas.endDraw();
 
         // Draw toolbar (screen space, on top)
@@ -144,52 +156,81 @@ pub fn main() anyerror!void {
 fn handleSelect(
     shapes: *shape_mod.ShapeList,
     is_dragging: *bool,
-    drag_offset: *rl.Vector2,
-    drag_index: *?usize,
+    drag_start: *rl.Vector2,
+    drag_last: *rl.Vector2,
+    is_marquee: *bool,
+    marquee_start: *rl.Vector2,
     mouse_world: rl.Vector2,
     history: *History,
 ) void {
+    const shift = rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift);
+
     if (rl.isMouseButtonPressed(.left)) {
         if (shapes.findAt(mouse_world)) |idx| {
-            if (!shapes.shapes.items[idx].selected) {
-                shapes.deselectAll();
-                shapes.shapes.items[idx].selected = true;
+            // Clicked on a shape
+            if (shift) {
+                // Shift+click: toggle this shape's selection
+                shapes.shapes.items[idx].selected = !shapes.shapes.items[idx].selected;
+            } else {
+                if (!shapes.shapes.items[idx].selected) {
+                    shapes.deselectAll();
+                    shapes.shapes.items[idx].selected = true;
+                }
             }
+            // Start dragging all selected shapes
             is_dragging.* = true;
-            drag_index.* = idx;
-            drag_offset.* = .{
-                .x = mouse_world.x - shapes.shapes.items[idx].start.x,
-                .y = mouse_world.y - shapes.shapes.items[idx].start.y,
-            };
+            drag_start.* = mouse_world;
+            drag_last.* = mouse_world;
         } else {
-            shapes.deselectAll();
+            // Clicked on empty space: start marquee selection
+            if (!shift) {
+                shapes.deselectAll();
+            }
+            is_marquee.* = true;
+            marquee_start.* = mouse_world;
         }
     }
 
+    // Dragging selected shapes
     if (is_dragging.* and rl.isMouseButtonDown(.left)) {
-        if (drag_index.*) |idx| {
-            if (idx < shapes.shapes.items.len) {
-                const s = &shapes.shapes.items[idx];
-                const dx = mouse_world.x - drag_offset.*.x - s.start.x;
-                const dy = mouse_world.y - drag_offset.*.y - s.start.y;
-                s.start.x += dx;
-                s.start.y += dy;
-                s.end.x += dx;
-                s.end.y += dy;
-                for (s.points.items) |*p| {
-                    p.x += dx;
-                    p.y += dy;
-                }
-            }
-        }
+        const dx = mouse_world.x - drag_last.*.x;
+        const dy = mouse_world.y - drag_last.*.y;
+        shapes.moveSelected(dx, dy);
+        drag_last.* = mouse_world;
     }
 
     if (rl.isMouseButtonReleased(.left) and is_dragging.*) {
         is_dragging.* = false;
-        // Push state after drag
-        history.pushState(shapes) catch {};
-        drag_index.* = null;
+        // Only push history if we actually moved
+        const dx = mouse_world.x - drag_start.*.x;
+        const dy = mouse_world.y - drag_start.*.y;
+        if (dx * dx + dy * dy > 1) {
+            history.pushState(shapes) catch {};
+        }
     }
+
+    // Marquee selection: update while dragging
+    if (is_marquee.* and rl.isMouseButtonDown(.left)) {
+        // Selection happens on release
+    }
+
+    if (rl.isMouseButtonReleased(.left) and is_marquee.*) {
+        is_marquee.* = false;
+        const sel_rect = normalizeRect(marquee_start.*, mouse_world);
+        if (sel_rect.width > 2 or sel_rect.height > 2) {
+            shapes.selectInRect(sel_rect);
+        }
+    }
+}
+
+/// Build a normalized rectangle from two corner points.
+fn normalizeRect(a: rl.Vector2, b: rl.Vector2) rl.Rectangle {
+    return .{
+        .x = @min(a.x, b.x),
+        .y = @min(a.y, b.y),
+        .width = @abs(b.x - a.x),
+        .height = @abs(b.y - a.y),
+    };
 }
 
 fn handleDraw(
