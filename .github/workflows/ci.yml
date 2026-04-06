@@ -51,31 +51,3 @@ jobs:
         with:
           name: zigdraw-x86_64-linux
           path: zig-out/bin/
-
-  build-macos:
-    runs-on: macos-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
-
-      - name: Pre-fetch xcode-frameworks via system git
-        env:
-          ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-cache
-        run: |
-          git clone https://github.com/hexops/xcode-frameworks.git /tmp/xcode-frameworks
-          cd /tmp/xcode-frameworks && git checkout 9a45f3ac977fd25dff77e58c6de1870b6808c4a7
-          zig fetch /tmp/xcode-frameworks
-
-      - name: Build
-        run: zig build
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: zigdraw-aarch64-macos
-          path: zig-out/bin/
