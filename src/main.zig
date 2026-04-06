@@ -48,6 +48,10 @@ pub fn main() anyerror!void {
     // Command bar state
     var cmd_bar = CommandBar{};
 
+    // Current file path (set after save or open)
+    var current_file_buf: [1024]u8 = undefined;
+    var current_file_len: usize = 0;
+
     // Toast notification state
     var toast_msg: [:0]const u8 = "";
     var toast_timer: f32 = 0;
@@ -108,7 +112,18 @@ pub fn main() anyerror!void {
         // Ctrl+S save, Ctrl+O load — open command bar
         if (cmd_bar.mode == .hidden) {
             if (ctrl and rl.isKeyPressed(.s)) {
-                cmd_bar.open(.save, true);
+                if (current_file_len > 0) {
+                    // Save directly to known file
+                    if (file_io.save(&shapes, current_file_buf[0..current_file_len])) {
+                        toast_msg = "Saved!";
+                        toast_timer = 2.0;
+                    } else |_| {
+                        toast_msg = "Save failed!";
+                        toast_timer = 2.0;
+                    }
+                } else {
+                    cmd_bar.open(.save, true);
+                }
             }
             if (ctrl and rl.isKeyPressed(.o)) {
                 cmd_bar.open(.open, false);
@@ -123,6 +138,10 @@ pub fn main() anyerror!void {
                 switch (cmd_bar.mode) {
                     .save => {
                         if (file_io.save(&shapes, path)) {
+                            // Remember the file path
+                            const plen = @min(path.len, current_file_buf.len);
+                            @memcpy(current_file_buf[0..plen], path[0..plen]);
+                            current_file_len = plen;
                             toast_msg = "Saved!";
                             toast_timer = 2.0;
                         } else |_| {
@@ -132,6 +151,10 @@ pub fn main() anyerror!void {
                     },
                     .open => {
                         if (file_io.load(&shapes, path)) {
+                            // Remember the file path
+                            const plen = @min(path.len, current_file_buf.len);
+                            @memcpy(current_file_buf[0..plen], path[0..plen]);
+                            current_file_len = plen;
                             toast_msg = "Loaded!";
                             toast_timer = 2.0;
                             history.pushState(&shapes) catch {};
@@ -213,7 +236,7 @@ pub fn main() anyerror!void {
         // Toast notification
         if (toast_timer > 0) {
             toast_timer -= rl.getFrameTime();
-            const alpha: u8 = if (toast_timer > 0.5) 220 else @intFromFloat(toast_timer * 440);
+            const alpha: u8 = if (toast_timer > 0.5) 220 else if (toast_timer > 0) @intFromFloat(toast_timer * 440) else 0;
             const tw: f32 = @floatFromInt(rl.measureText(toast_msg, 16));
             const tx = screen_w / 2 - tw / 2 - 12;
             const ty = screen_h - 60;

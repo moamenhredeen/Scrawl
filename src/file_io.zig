@@ -28,7 +28,7 @@ pub const FileError = error{
 };
 
 pub fn save(shape_list: *const shape_mod.ShapeList, path: []const u8) !void {
-    const file = try std.fs.cwd().createFile(path, .{});
+    const file = try createFile(path);
     defer file.close();
     var buf: [4096]u8 = undefined;
     var w = file.writer(&buf);
@@ -69,7 +69,7 @@ pub fn save(shape_list: *const shape_mod.ShapeList, path: []const u8) !void {
 }
 
 pub fn load(shape_list: *shape_mod.ShapeList, path: []const u8) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
+    const file = try openFile(path);
     defer file.close();
     var buf: [4096]u8 = undefined;
     var r = file.reader(&buf);
@@ -126,4 +126,36 @@ pub fn load(shape_list: *shape_mod.ShapeList, path: []const u8) !void {
         };
         try shape_list.shapes.append(shape_list.allocator, shape);
     }
+}
+
+fn isAbsolute(path: []const u8) bool {
+    if (path.len >= 1 and (path[0] == '/' or path[0] == '\\')) return true;
+    if (path.len >= 3 and path[1] == ':' and (path[2] == '/' or path[2] == '\\')) return true;
+    return false;
+}
+
+fn toNativePath(path: []const u8, out: *[std.fs.max_path_bytes]u8) []const u8 {
+    const len = @min(path.len, out.len);
+    for (0..len) |i| {
+        out[i] = if (path[i] == '/') '\\' else path[i];
+    }
+    return out[0..len];
+}
+
+fn createFile(path: []const u8) !std.fs.File {
+    if (isAbsolute(path)) {
+        var native_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const native = toNativePath(path, &native_buf);
+        return std.fs.createFileAbsolute(native, .{});
+    }
+    return std.fs.cwd().createFile(path, .{});
+}
+
+fn openFile(path: []const u8) !std.fs.File {
+    if (isAbsolute(path)) {
+        var native_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const native = toNativePath(path, &native_buf);
+        return std.fs.openFileAbsolute(native, .{});
+    }
+    return std.fs.cwd().openFile(path, .{});
 }
