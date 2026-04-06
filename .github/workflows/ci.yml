@@ -7,19 +7,33 @@ on:
     branches: [main]
 
 jobs:
-  build-linux-windows:
+  build-windows:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - x86_64-windows
-          - x86_64-linux
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install X11 dev libraries (Linux targets)
-        if: contains(matrix.target, 'linux')
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build
+        run: zig build -Dtarget=x86_64-windows
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zigdraw-x86_64-windows
+          path: zig-out/bin/
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install X11 dev libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxext-dev libxfixes-dev libgl-dev
@@ -30,12 +44,12 @@ jobs:
           version: 0.15.2
 
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }}
+        run: zig build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zigdraw-${{ matrix.target }}
+          name: zigdraw-x86_64-linux
           path: zig-out/bin/
 
   build-macos:
