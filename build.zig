@@ -25,7 +25,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkLibrary(raylib_artifact);
     exe.root_module.addImport("raylib", raylib);
     exe.root_module.addImport("raygui", raygui);
-    exe.subsystem = .Windows;
+    if (exe.rootModuleTarget().os.tag == .windows) {
+        exe.subsystem = .Windows;
+    }
     b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the app");
