@@ -1,0 +1,208 @@
+const std = @import("std");
+const rl = @import("raylib");
+
+pub const ShapeKind = enum {
+    rectangle,
+    ellipse,
+    line,
+    arrow,
+    freehand,
+};
+
+pub const Shape = struct {
+    kind: ShapeKind,
+    start: rl.Vector2,
+    end: rl.Vector2,
+    color: rl.Color,
+    stroke_width: f32,
+    points: std.ArrayList(rl.Vector2),
+    selected: bool = false,
+
+    pub fn deinit(self: *Shape, allocator: std.mem.Allocator) void {
+        self.points.deinit(allocator);
+    }
+
+    pub fn boundingRect(self: Shape) rl.Rectangle {
+        return switch (self.kind) {
+            .rectangle, .ellipse => .{
+                .x = @min(self.start.x, self.end.x),
+                .y = @min(self.start.y, self.end.y),
+                .width = @abs(self.end.x - self.start.x),
+                .height = @abs(self.end.y - self.start.y),
+            },
+            .line, .arrow => .{
+                .x = @min(self.start.x, self.end.x) - 5,
+                .y = @min(self.start.y, self.end.y) - 5,
+                .width = @abs(self.end.x - self.start.x) + 10,
+                .height = @abs(self.end.y - self.start.y) + 10,
+            },
+            .freehand => blk: {
+                if (self.points.items.len == 0) break :blk rl.Rectangle{ .x = 0, .y = 0, .width = 0, .height = 0 };
+                var min_x: f32 = self.points.items[0].x;
+                var min_y: f32 = self.points.items[0].y;
+                var max_x: f32 = min_x;
+                var max_y: f32 = min_y;
+                for (self.points.items[1..]) |p| {
+                    min_x = @min(min_x, p.x);
+                    min_y = @min(min_y, p.y);
+                    max_x = @max(max_x, p.x);
+                    max_y = @max(max_y, p.y);
+                }
+                break :blk rl.Rectangle{
+                    .x = min_x - 5,
+                    .y = min_y - 5,
+                    .width = max_x - min_x + 10,
+                    .height = max_y - min_y + 10,
+                };
+            },
+        };
+    }
+
+    pub fn containsPoint(self: Shape, point: rl.Vector2) bool {
+        switch (self.kind) {
+            .rectangle, .ellipse => {
+                return rl.checkCollisionPointRec(point, self.boundingRect());
+            },
+            .line, .arrow => {
+                return rl.checkCollisionPointLine(point, self.start, self.end, @intFromFloat(self.stroke_width + 6));
+            },
+            .freehand => {
+                for (self.points.items) |p| {
+                    const dx = point.x - p.x;
+                    const dy = point.y - p.y;
+                    if (dx * dx + dy * dy < (self.stroke_width + 6) * (self.stroke_width + 6)) return true;
+                }
+                return false;
+            },
+        }
+    }
+
+    pub fn draw(self: Shape) void {
+        switch (self.kind) {
+            .rectangle => {
+                const rect = self.normalizedRect();
+                rl.drawRectangleLinesEx(rect, self.stroke_width, self.color);
+            },
+            .ellipse => {
+                const rect = self.normalizedRect();
+                const cx = rect.x + rect.width / 2;
+                const cy = rect.y + rect.height / 2;
+                rl.drawEllipseLines(
+                    @intFromFloat(cx),
+                    @intFromFloat(cy),
+                    rect.width / 2,
+                    rect.height / 2,
+                    self.color,
+                );
+            },
+            .line => {
+                rl.drawLineEx(self.start, self.end, self.stroke_width, self.color);
+            },
+            .arrow => {
+                rl.drawLineEx(self.start, self.end, self.stroke_width, self.color);
+                drawArrowHead(self.start, self.end, self.stroke_width, self.color);
+            },
+            .freehand => {
+                if (self.points.items.len < 2) return;
+                for (0..self.points.items.len - 1) |i| {
+                    rl.drawLineEx(self.points.items[i], self.points.items[i + 1], self.stroke_width, self.color);
+                }
+            },
+        }
+
+        if (self.selected) {
+            const r = self.boundingRect();
+            const sel_rect = rl.Rectangle{
+                .x = r.x - 3,
+                .y = r.y - 3,
+                .width = r.width + 6,
+                .height = r.height + 6,
+            };
+            rl.drawRectangleLinesEx(sel_rect, 1, rl.Color.init(100, 150, 255, 200));
+        }
+    }
+
+    fn normalizedRect(self: Shape) rl.Rectangle {
+        return .{
+            .x = @min(self.start.x, self.end.x),
+            .y = @min(self.start.y, self.end.y),
+            .width = @abs(self.end.x - self.start.x),
+            .height = @abs(self.end.y - self.start.y),
+        };
+    }
+};
+
+fn drawArrowHead(from: rl.Vector2, to: rl.Vector2, thickness: f32, color: rl.Color) void {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = @sqrt(dx * dx + dy * dy);
+    if (len < 1) return;
+
+    const nx = dx / len;
+    const ny = dy / len;
+    const arrow_size: f32 = @max(10, thickness * 4);
+
+    const p1 = rl.Vector2{
+        .x = to.x - arrow_size * nx + arrow_size * 0.4 * ny,
+        .y = to.y - arrow_size * ny - arrow_size * 0.4 * nx,
+    };
+    const p2 = rl.Vector2{
+        .x = to.x - arrow_size * nx - arrow_size * 0.4 * ny,
+        .y = to.y - arrow_size * ny + arrow_size * 0.4 * nx,
+    };
+    rl.drawLineEx(to, p1, thickness, color);
+    rl.drawLineEx(to, p2, thickness, color);
+}
+
+pub const ShapeList = struct {
+    shapes: std.ArrayList(Shape) = .empty,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) ShapeList {
+        return .{
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *ShapeList) void {
+        for (self.shapes.items) |*s| s.deinit(self.allocator);
+        self.shapes.deinit(self.allocator);
+    }
+
+    pub fn add(self: *ShapeList, shape: Shape) !void {
+        try self.shapes.append(self.allocator, shape);
+    }
+
+    pub fn remove(self: *ShapeList, index: usize) void {
+        var s = self.shapes.orderedRemove(index);
+        s.deinit(self.allocator);
+    }
+
+    pub fn deselectAll(self: *ShapeList) void {
+        for (self.shapes.items) |*s| s.selected = false;
+    }
+
+    pub fn drawAll(self: ShapeList) void {
+        for (self.shapes.items) |s| s.draw();
+    }
+
+    pub fn findAt(self: ShapeList, point: rl.Vector2) ?usize {
+        // Search in reverse so topmost shapes are found first
+        var i: usize = self.shapes.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (self.shapes.items[i].containsPoint(point)) return i;
+        }
+        return null;
+    }
+
+    pub fn deleteSelected(self: *ShapeList) void {
+        var i: usize = self.shapes.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (self.shapes.items[i].selected) {
+                self.remove(i);
+            }
+        }
+    }
+};
