@@ -7,6 +7,9 @@ const Toolbar = toolbar_mod.Toolbar;
 const Tool = toolbar_mod.Tool;
 const Theme = toolbar_mod.Theme;
 const History = @import("history.zig").History;
+const file_io = @import("file_io.zig");
+const CommandBar = @import("command_bar.zig").CommandBar;
+const CmdMode = @import("command_bar.zig").Mode;
 
 const init_width = 1280;
 const init_height = 800;
@@ -41,6 +44,13 @@ pub fn main() anyerror!void {
     var is_marquee = false;
     var marquee_start = rl.Vector2{ .x = 0, .y = 0 };
 
+    // Command bar state
+    var cmd_bar = CommandBar{};
+
+    // Toast notification state
+    var toast_msg: [:0]const u8 = "";
+    var toast_timer: f32 = 0;
+
     // Push initial empty state
     try history.pushState(&shapes);
 
@@ -51,21 +61,23 @@ pub fn main() anyerror!void {
         const mouse_world = canvas.screenToWorld(mouse_screen);
         const in_canvas = mouse_screen.y >= toolbar.height;
 
-        // --- Keyboard shortcuts ---
-        toolbar.handleShortcuts();
-
-        // Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo
+        // --- Keyboard shortcuts (disabled when command bar is active) ---
         const ctrl = rl.isKeyDown(.left_control) or rl.isKeyDown(.right_control);
         const shift = rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift);
-        if (ctrl and rl.isKeyPressed(.z) and !shift) {
-            try history.undo(&shapes);
-        }
-        if (ctrl and (rl.isKeyPressed(.y) or (rl.isKeyPressed(.z) and shift))) {
-            try history.redo(&shapes);
+        if (cmd_bar.mode == .hidden) {
+            toolbar.handleShortcuts();
+
+            // Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo
+            if (ctrl and rl.isKeyPressed(.z) and !shift) {
+                try history.undo(&shapes);
+            }
+            if (ctrl and (rl.isKeyPressed(.y) or (rl.isKeyPressed(.z) and shift))) {
+                try history.redo(&shapes);
+            }
         }
 
-        // Delete selected
-        if (rl.isKeyPressed(.delete) or rl.isKeyPressed(.backspace)) {
+        // Delete selected (only when command bar hidden)
+        if (cmd_bar.mode == .hidden and (rl.isKeyPressed(.delete) or rl.isKeyPressed(.backspace))) {
             var has_selected = false;
             for (shapes.shapes.items) |s| {
                 if (s.selected) {
@@ -79,8 +91,8 @@ pub fn main() anyerror!void {
             }
         }
 
-        // Escape: cancel drawing or deselect
-        if (rl.isKeyPressed(.escape)) {
+        // Escape: cancel drawing or deselect (only when command bar hidden)
+        if (rl.isKeyPressed(.escape) and cmd_bar.mode == .hidden) {
             if (is_drawing) {
                 if (current_shape) |*cs| cs.deinit(allocator);
                 current_shape = null;
@@ -90,11 +102,52 @@ pub fn main() anyerror!void {
             }
         }
 
-        // --- Canvas pan/zoom ---
-        canvas.update(toolbar.height);
+        // Ctrl+S save, Ctrl+O load — open command bar
+        if (cmd_bar.mode == .hidden) {
+            if (ctrl and rl.isKeyPressed(.s)) {
+                cmd_bar.open(.save, true);
+            }
+            if (ctrl and rl.isKeyPressed(.o)) {
+                cmd_bar.open(.open, false);
+            }
+        }
 
-        // --- Tool interaction ---
-        if (in_canvas and !canvas.is_panning and !rl.isKeyDown(.space)) {
+        // Command bar input handling
+        const cmd_result = cmd_bar.update();
+        if (cmd_result == .confirmed) {
+            const path = cmd_bar.getPath();
+            if (path.len > 0) {
+                switch (cmd_bar.mode) {
+                    .save => {
+                        if (file_io.save(&shapes, path)) {
+                            toast_msg = "Saved!";
+                            toast_timer = 2.0;
+                        } else |_| {
+                            toast_msg = "Save failed!";
+                            toast_timer = 2.0;
+                        }
+                    },
+                    .open => {
+                        if (file_io.load(&shapes, path)) {
+                            toast_msg = "Loaded!";
+                            toast_timer = 2.0;
+                            history.pushState(&shapes) catch {};
+                        } else |_| {
+                            toast_msg = "Load failed!";
+                            toast_timer = 2.0;
+                        }
+                    },
+                    .hidden => {},
+                }
+            }
+            cmd_bar.close();
+        }
+
+        // --- Canvas pan/zoom (skip when command bar is active) ---
+        if (cmd_bar.mode == .hidden) canvas.update(toolbar.height);
+
+        // --- Tool interaction (skip when command bar is active) ---
+        if (in_canvas and !canvas.is_panning and !rl.isKeyDown(.space) and cmd_bar.mode == .hidden) {
             switch (toolbar.current_tool) {
                 .select => handleSelect(
                     &shapes,
@@ -148,8 +201,22 @@ pub fn main() anyerror!void {
             try history.redo(&shapes);
         }
 
+        // Command bar (above status bar)
+        cmd_bar.draw(screen_w, screen_h, toolbar.theme);
+
         // Status bar
         drawStatusBar(screen_w, screen_h, &toolbar, &canvas, shapes.shapes.items.len, toolbar.theme);
+
+        // Toast notification
+        if (toast_timer > 0) {
+            toast_timer -= rl.getFrameTime();
+            const alpha: u8 = if (toast_timer > 0.5) 220 else @intFromFloat(toast_timer * 440);
+            const tw: f32 = @floatFromInt(rl.measureText(toast_msg, 16));
+            const tx = screen_w / 2 - tw / 2 - 12;
+            const ty = screen_h - 60;
+            rl.drawRectangleRounded(.{ .x = tx, .y = ty, .width = tw + 24, .height = 28 }, 0.4, 8, rl.Color.init(50, 50, 70, alpha));
+            rl.drawText(toast_msg, @intFromFloat(tx + 12), @intFromFloat(ty + 6), 16, rl.Color.init(220, 220, 230, alpha));
+        }
     }
 }
 
