@@ -1,5 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
+const fonts = @import("fonts.zig");
 
 pub const ShapeKind = enum {
     rectangle,
@@ -7,6 +8,7 @@ pub const ShapeKind = enum {
     line,
     arrow,
     freehand,
+    text,
 };
 
 pub const Shape = struct {
@@ -16,6 +18,9 @@ pub const Shape = struct {
     color: rl.Color,
     stroke_width: f32,
     points: std.ArrayList(rl.Vector2),
+    text_buf: [256]u8 = undefined,
+    text_len: usize = 0,
+    font_size: f32 = 20,
     selected: bool = false,
 
     pub fn deinit(self: *Shape, allocator: std.mem.Allocator) void {
@@ -55,6 +60,16 @@ pub const Shape = struct {
                     .height = max_y - min_y + 10,
                 };
             },
+            .text => blk: {
+                const text_z = self.getTextZ();
+                const size = rl.measureTextEx(fonts.get(), text_z, self.font_size, 1);
+                break :blk rl.Rectangle{
+                    .x = self.start.x,
+                    .y = self.start.y,
+                    .width = @max(size.x, 10),
+                    .height = @max(size.y, self.font_size),
+                };
+            },
         };
     }
 
@@ -73,6 +88,9 @@ pub const Shape = struct {
                     if (dx * dx + dy * dy < (self.stroke_width + 6) * (self.stroke_width + 6)) return true;
                 }
                 return false;
+            },
+            .text => {
+                return rl.checkCollisionPointRec(point, self.boundingRect());
             },
         }
     }
@@ -114,6 +132,10 @@ pub const Shape = struct {
                     rl.drawLineEx(self.points.items[i], self.points.items[i + 1], self.stroke_width, self.color);
                 }
             },
+            .text => {
+                const text_z = self.getTextZ();
+                rl.drawTextEx(fonts.get(), text_z, self.start, self.font_size, 1, self.color);
+            },
         }
 
         if (self.selected) {
@@ -126,6 +148,32 @@ pub const Shape = struct {
             };
             rl.drawRectangleLinesEx(sel_rect, 1, rl.Color.init(100, 150, 255, 200));
         }
+    }
+
+    pub fn getTextZ(self: *const Shape) [:0]const u8 {
+        const S = struct {
+            threadlocal var buf: [257]u8 = undefined;
+        };
+        const len = @min(self.text_len, 256);
+        @memcpy(S.buf[0..len], self.text_buf[0..len]);
+        S.buf[len] = 0;
+        return S.buf[0..len :0];
+    }
+
+    pub fn setText(self: *Shape, text: []const u8) void {
+        const len = @min(text.len, self.text_buf.len);
+        @memcpy(self.text_buf[0..len], text[0..len]);
+        self.text_len = len;
+    }
+
+    pub fn textInsertChar(self: *Shape, c: u8) void {
+        if (self.text_len >= self.text_buf.len) return;
+        self.text_buf[self.text_len] = c;
+        self.text_len += 1;
+    }
+
+    pub fn textDeleteChar(self: *Shape) void {
+        if (self.text_len > 0) self.text_len -= 1;
     }
 
     fn normalizedRect(self: Shape) rl.Rectangle {

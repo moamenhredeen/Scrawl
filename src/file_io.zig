@@ -18,7 +18,7 @@ const shape_mod = @import("shape.zig");
 ///   [4 bytes] point_count: u32  (0 for non-freehand)
 ///   [8 * point_count bytes] points: f32 x, f32 y each
 const magic = [4]u8{ 'Z', 'D', 'R', 'W' };
-const format_version: u16 = 1;
+const format_version: u16 = 2;
 
 pub const FileError = error{
     InvalidMagic,
@@ -64,6 +64,14 @@ pub fn save(shape_list: *const shape_mod.ShapeList, path: []const u8) !void {
             try writer.writeAll(std.mem.asBytes(&p.x));
             try writer.writeAll(std.mem.asBytes(&p.y));
         }
+        // Text data (v2)
+        if (s.kind == .text) {
+            try writer.writeAll(std.mem.asBytes(&s.font_size));
+            const text_len: u16 = @intCast(s.text_len);
+            const tl_le = std.mem.nativeToLittle(u16, text_len);
+            try writer.writeAll(std.mem.asBytes(&tl_le));
+            try writer.writeAll(s.text_buf[0..s.text_len]);
+        }
     }
     try writer.flush();
 }
@@ -82,7 +90,7 @@ pub fn load(shape_list: *shape_mod.ShapeList, path: []const u8) !void {
     }
 
     const version = std.mem.littleToNative(u16, @bitCast((try reader.takeArray(2)).*));
-    if (version != format_version) {
+    if (version != 1 and version != 2) {
         return FileError.UnsupportedVersion;
     }
 
@@ -115,6 +123,18 @@ pub fn load(shape_list: *shape_mod.ShapeList, path: []const u8) !void {
             try points.append(shape_list.allocator, .{ .x = px, .y = py });
         }
 
+        var text_buf: [256]u8 = undefined;
+        var text_len: usize = 0;
+        var font_size: f32 = 20;
+        if (version >= 2 and kind == .text) {
+            font_size = @as(f32, @bitCast((try reader.takeArray(4)).*));
+            const tl = std.mem.littleToNative(u16, @bitCast((try reader.takeArray(2)).*));
+            text_len = @min(tl, 256);
+            for (0..text_len) |ti| {
+                text_buf[ti] = try reader.takeByte();
+            }
+        }
+
         const shape = shape_mod.Shape{
             .kind = kind,
             .start = .{ .x = start_x, .y = start_y },
@@ -122,6 +142,9 @@ pub fn load(shape_list: *shape_mod.ShapeList, path: []const u8) !void {
             .color = rl.Color.init(color_ptr[0], color_ptr[1], color_ptr[2], color_ptr[3]),
             .stroke_width = stroke_width,
             .points = points,
+            .text_buf = text_buf,
+            .text_len = text_len,
+            .font_size = font_size,
             .selected = false,
         };
         try shape_list.shapes.append(shape_list.allocator, shape);

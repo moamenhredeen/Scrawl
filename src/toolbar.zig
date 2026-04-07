@@ -9,6 +9,7 @@ pub const Tool = enum {
     line,
     arrow,
     freehand,
+    text,
 };
 
 pub const ColorPreset = struct {
@@ -143,6 +144,7 @@ pub const Toolbar = struct {
             .line => .line,
             .arrow => .arrow,
             .freehand => .freehand,
+            .text => .text,
         };
     }
 
@@ -172,8 +174,8 @@ pub const Toolbar = struct {
         const gap: f32 = 3;
 
         // Tool buttons
-        const tool_labels = [_][:0]const u8{ "Sel", "Rec", "Ell", "Lin", "Arr", "Pen" };
-        const tools = [_]Tool{ .select, .rectangle, .ellipse, .line, .arrow, .freehand };
+        const tool_labels = [_][:0]const u8{ "Sel", "Rec", "Ell", "Lin", "Arr", "Pen", "Txt" };
+        const tools = [_]Tool{ .select, .rectangle, .ellipse, .line, .arrow, .freehand, .text };
 
         for (tools, 0..) |tool, i| {
             const is_active = self.current_tool == tool;
@@ -304,6 +306,7 @@ pub const Toolbar = struct {
         if (rl.isKeyPressed(.l) or rl.isKeyPressed(.four)) self.current_tool = .line;
         if (rl.isKeyPressed(.a) or rl.isKeyPressed(.five)) self.current_tool = .arrow;
         if (rl.isKeyPressed(.p) or rl.isKeyPressed(.six)) self.current_tool = .freehand;
+        if (rl.isKeyPressed(.t) or rl.isKeyPressed(.seven)) self.current_tool = .text;
     }
 
     fn colorToInt(c: rl.Color) i32 {

@@ -10,6 +10,7 @@ const History = @import("history.zig").History;
 const file_io = @import("file_io.zig");
 const CommandBar = @import("command_bar.zig").CommandBar;
 const CmdMode = @import("command_bar.zig").Mode;
+const fonts = @import("fonts.zig");
 
 const init_width = 1280;
 const init_height = 800;
@@ -35,6 +36,9 @@ pub fn main() anyerror!void {
     // Drawing state
     var is_drawing = false;
     var current_shape: ?shape_mod.Shape = null;
+
+    // Text editing state
+    var is_editing_text = false;
 
     // Selection/drag state
     var is_dragging = false;
@@ -66,10 +70,10 @@ pub fn main() anyerror!void {
         const mouse_world = canvas.screenToWorld(mouse_screen);
         const in_canvas = mouse_screen.y >= toolbar.height;
 
-        // --- Keyboard shortcuts (disabled when command bar is active) ---
+        // --- Keyboard shortcuts (disabled when command bar or text editing is active) ---
         const ctrl = rl.isKeyDown(.left_control) or rl.isKeyDown(.right_control);
         const shift = rl.isKeyDown(.left_shift) or rl.isKeyDown(.right_shift);
-        if (cmd_bar.mode == .hidden) {
+        if (cmd_bar.mode == .hidden and !is_editing_text) {
             toolbar.handleShortcuts();
 
             // Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo
@@ -81,8 +85,8 @@ pub fn main() anyerror!void {
             }
         }
 
-        // Delete selected (only when command bar hidden)
-        if (cmd_bar.mode == .hidden and (rl.isKeyPressed(.delete) or rl.isKeyPressed(.backspace))) {
+        // Delete selected (only when command bar hidden and not editing text)
+        if (cmd_bar.mode == .hidden and !is_editing_text and (rl.isKeyPressed(.delete) or rl.isKeyPressed(.backspace))) {
             var has_selected = false;
             for (shapes.shapes.items) |s| {
                 if (s.selected) {
@@ -96,9 +100,14 @@ pub fn main() anyerror!void {
             }
         }
 
-        // Escape: cancel drawing, deselect, or reset tool (only when command bar hidden)
+        // Escape: cancel text editing, cancel drawing, deselect, or reset tool
         if (rl.isKeyPressed(.escape) and cmd_bar.mode == .hidden) {
-            if (is_drawing) {
+            if (is_editing_text) {
+                // Cancel text editing, discard the text shape
+                if (current_shape) |*cs| cs.deinit(allocator);
+                current_shape = null;
+                is_editing_text = false;
+            } else if (is_drawing) {
                 if (current_shape) |*cs| cs.deinit(allocator);
                 current_shape = null;
                 is_drawing = false;
@@ -172,8 +181,38 @@ pub fn main() anyerror!void {
         // --- Canvas pan/zoom (skip when command bar is active) ---
         if (cmd_bar.mode == .hidden) canvas.update(toolbar.height);
 
-        // --- Tool interaction (skip when command bar is active) ---
-        if (in_canvas and !canvas.is_panning and !rl.isKeyDown(.space) and cmd_bar.mode == .hidden) {
+        // --- Text editing input ---
+        if (is_editing_text) {
+            if (current_shape) |*cs| {
+                // Enter confirms the text
+                if (rl.isKeyPressed(.enter) or rl.isKeyPressed(.kp_enter)) {
+                    if (cs.text_len > 0) {
+                        try history.pushState(&shapes);
+                        try shapes.add(cs.*);
+                    } else {
+                        cs.deinit(allocator);
+                    }
+                    current_shape = null;
+                    is_editing_text = false;
+                } else {
+                    // Backspace
+                    if (rl.isKeyPressed(.backspace) or rl.isKeyPressedRepeat(.backspace)) {
+                        cs.textDeleteChar();
+                    }
+                    // Character input
+                    var char = rl.getCharPressed();
+                    while (char != 0) {
+                        if (char >= 32 and char < 127) {
+                            cs.textInsertChar(@intCast(char));
+                        }
+                        char = rl.getCharPressed();
+                    }
+                }
+            }
+        }
+
+        // --- Tool interaction (skip when command bar is active or editing text) ---
+        if (in_canvas and !canvas.is_panning and !rl.isKeyDown(.space) and cmd_bar.mode == .hidden and !is_editing_text) {
             switch (toolbar.current_tool) {
                 .select => handleSelect(
                     &shapes,
@@ -185,6 +224,21 @@ pub fn main() anyerror!void {
                     mouse_world,
                     &history,
                 ),
+                .text => {
+                    // Click to place text insertion point
+                    if (rl.isMouseButtonPressed(.left)) {
+                        current_shape = shape_mod.Shape{
+                            .kind = .text,
+                            .start = mouse_world,
+                            .end = mouse_world,
+                            .color = toolbar.currentColor(),
+                            .stroke_width = toolbar.currentStrokeWidth(),
+                            .font_size = 20,
+                            .points = .empty,
+                        };
+                        is_editing_text = true;
+                    }
+                },
                 else => handleDraw(
                     &shapes,
                     &is_drawing,
@@ -207,7 +261,25 @@ pub fn main() anyerror!void {
         canvas.beginDraw();
         drawGrid(&canvas, screen_w, screen_h, toolbar.height, toolbar.theme);
         shapes.drawAll();
-        if (current_shape) |cs| cs.draw();
+        if (current_shape) |cs| {
+            cs.draw();
+            // Draw blinking cursor for text editing
+            if (is_editing_text and cs.kind == .text) {
+                const time: f32 = @floatCast(rl.getTime());
+                if (@mod(time, 1.0) < 0.6) {
+                    const text_z = cs.getTextZ();
+                    const text_size = rl.measureTextEx(fonts.get(), text_z, cs.font_size, 1);
+                    const cursor_x = cs.start.x + text_size.x;
+                    const cursor_y = cs.start.y;
+                    rl.drawLineEx(
+                        .{ .x = cursor_x, .y = cursor_y },
+                        .{ .x = cursor_x, .y = cursor_y + cs.font_size },
+                        1.0 / canvas.zoom,
+                        cs.color,
+                    );
+                }
+            }
+        }
         // Draw marquee selection rectangle
         if (is_marquee) {
             const mrect = normalizeRect(marquee_start, mouse_world);
@@ -237,11 +309,11 @@ pub fn main() anyerror!void {
         if (toast_timer > 0) {
             toast_timer -= rl.getFrameTime();
             const alpha: u8 = if (toast_timer > 0.5) 220 else if (toast_timer > 0) @intFromFloat(toast_timer * 440) else 0;
-            const tw: f32 = @floatFromInt(rl.measureText(toast_msg, 16));
+            const tw: f32 = @floatFromInt(fonts.measureText(toast_msg, 16));
             const tx = screen_w / 2 - tw / 2 - 12;
             const ty = screen_h - 60;
             rl.drawRectangleRounded(.{ .x = tx, .y = ty, .width = tw + 24, .height = 28 }, 0.4, 8, rl.Color.init(50, 50, 70, alpha));
-            rl.drawText(toast_msg, @intFromFloat(tx + 12), @intFromFloat(ty + 6), 16, rl.Color.init(220, 220, 230, alpha));
+            fonts.drawText(toast_msg, @intFromFloat(tx + 12), @intFromFloat(ty + 6), 16, rl.Color.init(220, 220, 230, alpha));
         }
     }
 }
@@ -429,17 +501,18 @@ fn drawStatusBar(screen_w: f32, screen_h: f32, toolbar: *const Toolbar, canvas: 
         .line => "Line (L)",
         .arrow => "Arrow (A)",
         .freehand => "Pen (P)",
+        .text => "Text (T)",
     };
-    rl.drawText(tool_name, 10, @intFromFloat(y + 4), 14, tc);
+    fonts.drawText(tool_name, 10, @intFromFloat(y + 4), 14, tc);
 
     // Zoom
     var zoom_buf: [32]u8 = undefined;
     const zoom_pct: i32 = @intFromFloat(canvas.zoom * 100);
     const zoom_text = std.fmt.bufPrintZ(&zoom_buf, "{d}%", .{zoom_pct}) catch "?";
-    rl.drawText(zoom_text, @intFromFloat(screen_w / 2 - 30), @intFromFloat(y + 4), 14, tc);
+    fonts.drawText(zoom_text, @intFromFloat(screen_w / 2 - 30), @intFromFloat(y + 4), 14, tc);
 
     // Shape count
     var count_buf: [32]u8 = undefined;
     const count_text = std.fmt.bufPrintZ(&count_buf, "{d} shapes", .{shape_count}) catch "?";
-    rl.drawText(count_text, @intFromFloat(screen_w - 120), @intFromFloat(y + 4), 14, tc);
+    fonts.drawText(count_text, @intFromFloat(screen_w - 120), @intFromFloat(y + 4), 14, tc);
 }

@@ -25,6 +25,9 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkLibrary(raylib_artifact);
     exe.root_module.addImport("raylib", raylib);
     exe.root_module.addImport("raygui", raygui);
+    exe.root_module.addAnonymousImport("JetBrainsMonoNerdFont-Regular", .{
+        .root_source_file = b.path("assets/fonts/JetBrainsMonoNerdFont-Regular.ttf"),
+    });
     if (exe.rootModuleTarget().os.tag == .windows) {
         exe.subsystem = .Windows;
     }

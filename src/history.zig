@@ -24,6 +24,9 @@ pub const ShapeSnapshot = struct {
     color: rl.Color,
     stroke_width: f32,
     points: []rl.Vector2,
+    text_buf: [256]u8 = undefined,
+    text_len: usize = 0,
+    font_size: f32 = 20,
 
     pub fn deinit(self: *ShapeSnapshot, allocator: std.mem.Allocator) void {
         allocator.free(self.points);
@@ -110,6 +113,9 @@ pub const History = struct {
                 .color = s.color,
                 .stroke_width = s.stroke_width,
                 .points = pts,
+                .text_buf = s.text_buf,
+                .text_len = s.text_len,
+                .font_size = s.font_size,
             };
         }
         return .{
@@ -135,6 +141,9 @@ pub const History = struct {
                 .color = snap.color,
                 .stroke_width = snap.stroke_width,
                 .points = points,
+                .text_buf = snap.text_buf,
+                .text_len = snap.text_len,
+                .font_size = snap.font_size,
                 .selected = false,
             };
             shape_list.shapes.append(shape_list.allocator, new_shape) catch continue;

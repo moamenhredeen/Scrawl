@@ -2,6 +2,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const toolbar_mod = @import("toolbar.zig");
 const Theme = toolbar_mod.Theme;
+const fonts = @import("fonts.zig");
 
 pub const Mode = enum {
     hidden,
@@ -238,8 +239,8 @@ pub const CommandBar = struct {
             .open => "Open: ",
             .hidden => "",
         };
-        const prompt_w: f32 = @floatFromInt(rl.measureText(prompt, 16));
-        rl.drawText(prompt, 8, @intFromFloat(bar_y + 6), 16, theme.btnActive());
+        const prompt_w: f32 = @floatFromInt(fonts.measureText(prompt, 16));
+        fonts.drawText(prompt, 8, @intFromFloat(bar_y + 6), 16, theme.btnActive());
 
         // Path text
         var display_buf: [1025:0]u8 = undefined;
@@ -247,7 +248,7 @@ pub const CommandBar = struct {
         @memcpy(display_buf[0..path.len], path);
         display_buf[path.len] = 0;
         const display: [:0]const u8 = display_buf[0..path.len :0];
-        rl.drawText(display, @intFromFloat(8 + prompt_w), @intFromFloat(bar_y + 6), 16, theme.textColor());
+        fonts.drawText(display, @intFromFloat(8 + prompt_w), @intFromFloat(bar_y + 6), 16, theme.textColor());
 
         // Cursor (blinking)
         const time: f32 = @floatCast(rl.getTime());
@@ -258,7 +259,7 @@ pub const CommandBar = struct {
             @memcpy(cursor_buf[0..cursor_text.len], cursor_text);
             cursor_buf[cursor_text.len] = 0;
             const cursor_display: [:0]const u8 = cursor_buf[0..cursor_text.len :0];
-            const cursor_x: f32 = 8 + prompt_w + @as(f32, @floatFromInt(rl.measureText(cursor_display, 16)));
+            const cursor_x: f32 = 8 + prompt_w + @as(f32, @floatFromInt(fonts.measureText(cursor_display, 16)));
             rl.drawRectangle(@intFromFloat(cursor_x), @intFromFloat(bar_y + 5), 2, 18, theme.textColor());
         }
 
@@ -266,8 +267,8 @@ pub const CommandBar = struct {
         if (self.completion_active and self.completion_count > 1) {
             var hint_buf: [64:0]u8 = undefined;
             const hint = std.fmt.bufPrintZ(&hint_buf, "({d}/{d}) Tab to cycle", .{ self.completion_idx + 1, self.completion_count }) catch return;
-            const hint_w: f32 = @floatFromInt(rl.measureText(hint, 12));
-            rl.drawText(hint, @intFromFloat(screen_w - hint_w - 12), @intFromFloat(bar_y + 8), 12, theme.textDimColor());
+            const hint_w: f32 = @floatFromInt(fonts.measureText(hint, 12));
+            fonts.drawText(hint, @intFromFloat(screen_w - hint_w - 12), @intFromFloat(bar_y + 8), 12, theme.textDimColor());
         }
     }
 };
